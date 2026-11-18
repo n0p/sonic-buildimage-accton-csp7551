@@ -25,9 +25,28 @@
 #include <linux/acpi.h>
 #include <linux/i2c.h>
 #include <linux/nvmem-provider.h>
-#include <linux/platform_data/at24.h>
 #include <linux/printk.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
+
+/*
+ * <linux/platform_data/at24.h> was removed from the kernel tree (v5.16) when
+ * the in-tree at24 driver was converted to fwnode properties.  This driver
+ * keeps using the old internal representation, so the type and flags it needs
+ * are defined locally.
+ */
+struct at24_platform_data {
+	u32		byte_len;		/* size (sum of all addr) */
+	u16		page_size;		/* for writes */
+	u8		flags;
+	void		(*setup)(struct nvmem_device *nvmem, void *context);
+	void		*context;
+};
+
+#define AT24_FLAG_ADDR16	0x80	/* address pointer is 16 bit */
+#define AT24_FLAG_READONLY	0x40	/* sysfs-entry will be read-only */
+#define AT24_FLAG_TAKE8ADDR	0x10	/* take always 8 addresses (24c00) */
+#define AT24_FLAG_SERIAL	0x08	/* factory-programmed serial number */
+#define AT24_FLAG_MAC		0x04	/* factory-programmed mac address */
 /*
  * I2C EEPROMs from most vendors are inexpensive and mostly interchangeable.
  * Differences between different vendor product lines (like Atmel AT24C or
@@ -437,7 +456,7 @@ static void at24_get_ofdata(struct i2c_client *client,
 { }
 #endif /* CONFIG_OF */
 
-static int at24_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int at24_probe(struct i2c_client *client)
 {
 	struct at24_platform_data chip;
 	kernel_ulong_t magic = 0;
@@ -447,6 +466,7 @@ static int at24_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	struct at24_data *at24;
 	int err;
 	unsigned i, num_addresses;
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 
 	if (client->dev.platform_data) {
 		chip = *(struct at24_platform_data *)client->dev.platform_data;
@@ -589,9 +609,10 @@ static int at24_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	/* use dummy devices for multiple-address chips */
 	for (i = 1; i < num_addresses; i++) {
-		at24->client[i] = i2c_new_dummy(client->adapter,
+		at24->client[i] = i2c_new_dummy_device(client->adapter,
 					client->addr + i);
-		if (!at24->client[i]) {
+		if (IS_ERR(at24->client[i])) {
+			at24->client[i] = NULL;
 			dev_err(&client->dev, "address 0x%02x unavailable\n",
 					client->addr + i);
 			err = -EADDRINUSE;
@@ -645,7 +666,7 @@ err_clients:
 	return err;
 }
 
-static int at24_remove(struct i2c_client *client)
+static void at24_remove(struct i2c_client *client)
 {
 	struct at24_data *at24;
 	int i;
@@ -656,8 +677,6 @@ static int at24_remove(struct i2c_client *client)
 
 	for (i = 1; i < at24->num_addresses; i++)
 		i2c_unregister_device(at24->client[i]);
-
-	return 0;
 }
 
 /*-------------------------------------------------------------------------*/

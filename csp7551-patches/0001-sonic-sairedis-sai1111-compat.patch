@@ -1,0 +1,107 @@
+diff --git a/configure.ac b/configure.ac
+index 11640106..c3c726a3 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -269,7 +269,7 @@ https://github.com/opencomputeproject/SAI/pull/1795 (structs)
+ [AC_MSG_RESULT(ok)],
+ [AC_MSG_RESULT(failed)
+ AC_MSG_ERROR("SAI headers API version and library version mismatch")])],
+-[AC_MSG_ERROR("SAI library libsai.so does not have sai_query_api_version API which is required")])
++[AC_MSG_WARN("SAI vendor lib has no sai_query_api_version (Tofino blob, SAI 1.11); version check skipped")])
+ CXXFLAGS="$SAVED_FLAGS"
+ ])])
+ 
+diff --git a/meta/AttrKeyMap.cpp b/meta/AttrKeyMap.cpp
+index 9da52df6..5311a890 100644
+--- a/meta/AttrKeyMap.cpp
++++ b/meta/AttrKeyMap.cpp
+@@ -62,8 +62,10 @@ std::string AttrKeyMap::constructKey(
+ 
+     if (switchId == SAI_NULL_OBJECT_ID)
+     {
+-        SWSS_LOG_THROW("switchId is NULL for %s",
+-                sai_serialize_object_meta_key(metaKey).c_str());
++        /* CSP-7550: orchagent 202511 puede construir claves antes de conocer el
++         * switch id. Antes abortaba el proceso; ahora se avisa y se sigue. */
++        SWSS_LOG_WARN("constructKey: switchId is NULL for object type %d, continuing",
++                (int)metaKey.objecttype);
+     }
+ 
+     // Use map to make sure that keys will be always sorted by attr id.
+@@ -78,9 +80,12 @@ std::string AttrKeyMap::constructKey(
+ 
+         if (!md)
+         {
+-            SWSS_LOG_THROW("failed to get metadata for object type: %s and attr id: %d",
+-                    sai_serialize_object_id(metaKey.objecttype).c_str(),
+-                    attr.id);
++            /* CSP-7550: SONiC 202511 puede recibir atributos heredados (p.ej. "NULL")
++             * que no existen en los metadatos. Antes abortaba el proceso entero;
++             * ahora se omiten: la clave se construye con el resto. */
++            SWSS_LOG_WARN("constructKey: metadata missing for object type %d attr id %d, skipping",
++                    (int)metaKey.objecttype, attr.id);
++            continue;
+         }
+ 
+         const auto& value = attr.value;
+@@ -133,8 +138,10 @@ std::string AttrKeyMap::constructKey(
+             default:
+ 
+                 // NOTE: only primitive types should be considered as keys
+-                SWSS_LOG_THROW("FATAL: attribute %s marked as key, but have invalid serialization type, FIXME",
++                /* CSP-7550: tipo no soportado -> se omite el atributo en lugar de abortar. */
++                SWSS_LOG_WARN("constructKey: attr %s marked as key with unsupported serialization type, skipping",
+                         md->attridname);
++                continue;
+         }
+ 
+         keys[md->attrid] = name;
+diff --git a/syncd/VendorSai.cpp b/syncd/VendorSai.cpp
+index 7c050b2f..64b34bf9 100644
+--- a/syncd/VendorSai.cpp
++++ b/syncd/VendorSai.cpp
+@@ -49,7 +49,11 @@ VendorSai::VendorSai()
+         .log_set = &sai_log_set,
+         .object_type_get_availability = &sai_object_type_get_availability,
+         .object_type_query = &sai_object_type_query,
++#ifdef HAVE_SAI_QUERY_API_VERSION
+         .query_api_version = &sai_query_api_version,
++#else
++        .query_api_version = nullptr,
++#endif
+         .query_attribute_capability = &sai_query_attribute_capability,
+         .query_attribute_enum_values_capability = &sai_query_attribute_enum_values_capability,
+         .query_object_stage = nullptr,
+@@ -121,8 +125,18 @@ sai_status_t VendorSai::apiInitialize(
+     }
+ 
+     sai_api_version_t version{};
++    sai_status_t api_status;
+ 
+-    auto api_status = m_globalApis.query_api_version(&version);
++    if (m_globalApis.query_api_version == nullptr)
++    {
++        // Tofino SAI blob (1.11) has no sai_query_api_version: report its version.
++        version = SAI_VERSION(1, 11, 0);
++        api_status = SAI_STATUS_SUCCESS;
++    }
++    else
++    {
++        api_status = m_globalApis.query_api_version(&version);
++    }
+ 
+     if (api_status != SAI_STATUS_SUCCESS)
+     {
+@@ -2287,6 +2301,12 @@ sai_status_t VendorSai::queryApiVersion(
+ {
+     SWSS_LOG_ENTER();
+ 
++    if (m_globalApis.query_api_version == nullptr)
++    {
++        *version = SAI_VERSION(1, 11, 0);
++        return SAI_STATUS_SUCCESS;
++    }
++
+     return m_globalApis.query_api_version(version);
+ }
+ 

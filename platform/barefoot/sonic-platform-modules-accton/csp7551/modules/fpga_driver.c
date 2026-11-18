@@ -908,11 +908,7 @@ long fpga_ioctl(struct file *filp, unsigned int cmd, unsigned long user_addr)
         I2C_DEBUG( "[%s] READ\n", __func__);
         fpga_pci_dev = (struct fpga_pci_device *) filp->private_data;
 
-        if (!access_ok(
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
-		VERIFY_READ,
-#endif
-		user_addr, _IOC_SIZE(cmd)))
+        if (!access_ok((const void __user *)user_addr, _IOC_SIZE(cmd)))
         {
           //I2C_DEBUG( "[%s] Access NOT OK\n", __func__);
           return(-EINVAL);
@@ -948,11 +944,7 @@ long fpga_ioctl(struct file *filp, unsigned int cmd, unsigned long user_addr)
     {
         fpga_pci_dev = (struct fpga_pci_device *) filp->private_data;
 
-        if (!access_ok(
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
-		VERIFY_WRITE,
-#endif
-        user_addr, _IOC_SIZE(cmd)))
+        if (!access_ok((const void __user *)user_addr, _IOC_SIZE(cmd)))
         {
             I2C_DEBUG( "[%s] Access NOT OK\n", __func__);
             return(-EINVAL);
@@ -1023,11 +1015,7 @@ long fpga_ioctl(struct file *filp, unsigned int cmd, unsigned long user_addr)
     {
         fpga_pci_dev = (struct fpga_pci_device *) filp->private_data;
 
-        if (!access_ok(
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
-		VERIFY_WRITE,
-#endif
-        user_addr, _IOC_SIZE(cmd)))
+        if (!access_ok((const void __user *)user_addr, _IOC_SIZE(cmd)))
         {
             //I2C_DEBUG( "[%s] Access NOT OK\n", __func__);
             return(-EINVAL);
@@ -1162,7 +1150,7 @@ static int fpga_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
     }
 
     /* Create FPGA class */
-    fpga_pci_dev->fpga_class = class_create(THIS_MODULE, FPGA_CLASS_NAME);
+    fpga_pci_dev->fpga_class = class_create(FPGA_CLASS_NAME);
     if (IS_ERR(fpga_pci_dev->fpga_class))
     {
         ERROR_DEBUG( "[%s] Fail to create %s [fpga_class: %p]\n", __func__, FPGA_CLASS_NAME, fpga_pci_dev->fpga_class);
@@ -1268,7 +1256,7 @@ static int fpga_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
     {
         i2c_set_adapdata(&fpga_pci_dev->adapter[smbus_temp_num], fpga_pci_dev);
         fpga_pci_dev->adapter[smbus_temp_num].owner = THIS_MODULE;
-        fpga_pci_dev->adapter[smbus_temp_num].class = I2C_CLASS_HWMON | I2C_CLASS_SPD;;
+        fpga_pci_dev->adapter[smbus_temp_num].class = I2C_CLASS_HWMON;
         fpga_pci_dev->adapter[smbus_temp_num].algo = &smbus_algorithm;
         fpga_pci_dev->adapter[smbus_temp_num].dev.parent = &pdev->dev;
         //ACPI_COMPANION_SET(&priv->adapter.dev, ACPI_COMPANION(&dev->dev));

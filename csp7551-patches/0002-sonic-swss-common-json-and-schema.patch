@@ -1,0 +1,42 @@
+diff --git a/common/json.cpp b/common/json.cpp
+index 99b963f..95fc266 100644
+--- a/common/json.cpp
++++ b/common/json.cpp
+@@ -114,6 +114,16 @@ bool JSon::loadJsonFromFile(ifstream &fs, vector<KeyOpFieldsValuesTuple> &db_ite
+                 }
+                 else
+                 {
++                    /* CSP-7550: el valor del elemento puede venir como null (no string);
++                     * get<string>() lanzaba nlohmann type_error.302 y mataba el proceso.
++                     * Se descarta el elemento y se sigue. */
++                    if (!cur_obj.is_string())
++                    {
++                        SWSS_LOG_ERROR("Child element value is not a string op (%s), ignored",
++                                       cur_obj.dump().c_str());
++                        db_items.pop_back();
++                        break;
++                    }
+                     auto op = cur_obj.get<string>();
+ 
+                     if (op != "SET" && op != "DEL")
+diff --git a/gen_cfg_schema.py b/gen_cfg_schema.py
+index 23bdb83..6ca1cc6 100644
+--- a/gen_cfg_schema.py
++++ b/gen_cfg_schema.py
+@@ -1,5 +1,15 @@
+ import argparse
+-import sonic_yang
++import sys as _sys, os as _os, shutil as _shutil
++try:
++    import sonic_yang
++except ImportError:
++    # Sin modulo sonic_yang: reutilizar el header ya generado en el arbol.
++    _pre = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'common/cfg_schema.h.prebuilt')
++    _dst = _os.path.join(_os.getcwd(), 'common/cfg_schema.h')
++    if _os.path.exists(_pre):
++        _shutil.copy(_pre, _dst)
++        _sys.exit(0)
++    _sys.exit(1)
+ 
+ YANG_MODELS_DIR = "/usr/local/yang-models"
+ DEFAULT_OUTPUT_FILE = "common/cfg_schema.h"

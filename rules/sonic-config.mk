@@ -27,3 +27,6 @@ ifeq ($(ENABLE_PY2_MODULES), y)
 endif
 $(SONIC_CONFIG_ENGINE_PY3)_PYTHON_VERSION = 3
 SONIC_PYTHON_WHEELS += $(SONIC_CONFIG_ENGINE_PY3)
+
+# lab build: el test necesita /usr/share/sonic/device, ausente en el contenedor
+$(SONIC_CONFIG_ENGINE_PY3)_TEST = n

@@ -187,21 +187,12 @@ static inline struct bf_pci_dev *bf_get_pci_dev(struct bf_dev_info *info) {
  * It masks the msix on/off of generating MSI-X messages.
  */
 static void bf_msix_mask_irq(struct msi_desc *desc, int32_t state) {
-  u32 mask_bits = desc->masked;
-  unsigned offset = desc->msi_attrib.entry_nr * PCI_MSIX_ENTRY_SIZE +
-                    PCI_MSIX_ENTRY_VECTOR_CTRL;
-
-  if (state != 0) {
-    mask_bits &= ~PCI_MSIX_ENTRY_CTRL_MASKBIT;
-  } else {
-    mask_bits |= PCI_MSIX_ENTRY_CTRL_MASKBIT;
-  }
-
-  if (mask_bits != desc->masked) {
-    writel(mask_bits, desc->mask_base + offset);
-    readl(desc->mask_base);
-    desc->masked = mask_bits;
-  }
+  if (!desc->irq)
+    return;
+  if (state != 0)
+    enable_irq(desc->irq);
+  else
+    disable_irq_nosync(desc->irq);
 }
 
 /**
@@ -228,7 +219,7 @@ static int bf_pci_irqcontrol(struct bf_pci_dev *bfdev, s32 irq_state) {
     list_for_each_entry(desc, &pdev->msi_list, list)
         bf_msix_mask_irq(desc, irq_state);
 #else
-    for_each_pci_msi_entry(desc, pdev) bf_msix_mask_irq(desc, irq_state);
+    msi_for_each_desc(desc, &pdev->dev, MSI_DESC_ALL) bf_msix_mask_irq(desc, irq_state);
 #endif
   }
   pci_cfg_access_unlock(pdev);
@@ -1224,7 +1215,7 @@ static int bf_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id) {
    * This driver's calback function send the SIGIO signal to the user space
    * to indicate the error condition.
    */
-  pci_enable_pcie_error_reporting(pdev);
+  /* pci_enable_pcie_error_reporting: removed in 6.2 */
 
   bf_disable_int_dma(bfdev);
 
@@ -1426,7 +1417,7 @@ static void bf_pci_remove(struct pci_dev *pdev) {
   pci_clear_master(pdev);
   bf_pci_release_iomem(&bfdev->info);
   pci_release_regions(pdev);
-  pci_disable_pcie_error_reporting(pdev);
+  /* pci_disable_pcie_error_reporting: removed in 6.2 */
   pci_disable_device(pdev);
   pci_set_drvdata(pdev, NULL);
   bf_global[bfdev->info.minor].bfdev = NULL;
@@ -1601,7 +1592,7 @@ static int __init bfdrv_init(void) {
   pr_info("%s: %s\n", DRV_NAME(kpkt_mode),DRV_COPYRIGHT);
   memset(bf_global, 0, sizeof(bf_global));
   memset(bf_tof3_info, 0xff, sizeof(bf_tof3_info));
-  bf_class = class_create(THIS_MODULE, BF_CLASS_NAME);
+  bf_class = class_create(BF_CLASS_NAME);
   if (!bf_class) {
     printk(KERN_ERR "create_class failed for bf device\n");
     return -ENODEV;

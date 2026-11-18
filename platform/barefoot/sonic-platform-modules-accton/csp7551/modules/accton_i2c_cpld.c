@@ -363,6 +363,7 @@ static int cpld_read_internal(struct i2c_client *client, u8 reg)
 static ssize_t array_stringify(char *buf, u8 *input, size_t size) {
 
     int i;
+    size_t len;
     char t[MAX_RESP_LENGTH+1];
 
     buf[0] = '\0';
@@ -371,10 +372,18 @@ static ssize_t array_stringify(char *buf, u8 *input, size_t size) {
         strncat(buf, t, MAX_RESP_LENGTH);
     }
 
-    if (strlen(buf) > 0)
-        buf[strlen(buf)-1] = '\0'; /*Remove tailing blank*/
+    len = strlen(buf);
+    if (len > 0)
+        buf[len-1] = '\0'; /*Remove tailing blank*/
 
-    return snprintf(buf, MAX_RESP_LENGTH, "%s\n", buf);
+    /* Append the newline in place: snprintf(buf, ..., "%s\n", buf) overlaps. */
+    len = strlen(buf);
+    if (len + 1 >= MAX_RESP_LENGTH)
+        len = MAX_RESP_LENGTH - 2;
+    buf[len] = '\n';
+    buf[len + 1] = '\0';
+
+    return len + 1;
 }
 
 static ssize_t show_presnet_all_distinct(struct device *dev,
@@ -726,12 +735,17 @@ static int add_attributes(struct i2c_client *client,
     return 0;
 }
 
-static int accton_i2c_cpld_probe(struct i2c_client *client,
-                                 const struct i2c_device_id *dev_id)
+static int accton_i2c_cpld_probe(struct i2c_client *client)
 {
     int status;
     struct cpld_data *data = NULL;
     struct device *dev = &client->dev;
+    const struct i2c_device_id *dev_id = i2c_client_get_device_id(client);
+
+    if (!dev_id) {
+        dev_dbg(dev, "no i2c_device_id for 0x%x\n", client->addr);
+        return -ENODEV;
+    }
 
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
         dev_dbg(dev, "i2c_check_functionality failed (0x%x)\n", client->addr);
@@ -792,7 +806,7 @@ out_kfree:
 
 }
 
-static int accton_i2c_cpld_remove(struct i2c_client *client)
+static void accton_i2c_cpld_remove(struct i2c_client *client)
 {
     struct cpld_data *data = i2c_get_clientdata(client);
 
@@ -800,7 +814,6 @@ static int accton_i2c_cpld_remove(struct i2c_client *client)
     sysfs_remove_group(&client->dev.kobj, &data->group);
     kfree(data->group.attrs);
     accton_i2c_cpld_remove_client(client);
-    return 0;
 }
 
 int accton_i2c_cpld_read(u8 cpld_addr, u8 reg)

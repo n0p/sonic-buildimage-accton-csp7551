@@ -1801,11 +1801,15 @@ exit:
 }
 
 /* Platform dependent +++ */
-static int sfp_device_probe(struct i2c_client *client,
-            const struct i2c_device_id *dev_id)
+static int sfp_device_probe(struct i2c_client *client)
 {
     int ret = 0;
     struct sfp_port_data *data = NULL;
+    const struct i2c_device_id *dev_id = i2c_client_get_device_id(client);
+
+    if (!dev_id) {
+        return -ENODEV;
+    }
 
     if (client->addr != SFP_EEPROM_A0_I2C_ADDR) {
         return -ENODEV;
@@ -1931,18 +1935,21 @@ static int qsfp_remove(struct i2c_client *client, struct qsfp_data *data)
     return 0;
 }
 
-static int sfp_device_remove(struct i2c_client *client)
+static void sfp_device_remove(struct i2c_client *client)
 {
-    int ret = 0;
     struct sfp_port_data *data = i2c_get_clientdata(client);
+
+    if (!data)
+        return;
 
     switch (data->driver_type) {
         case DRIVER_TYPE_SFP_MSA:
-            return sfp_msa_remove(client, data->msa);
+            sfp_msa_remove(client, data->msa);
+            break;
         case DRIVER_TYPE_QSFP:
-            return qsfp_remove(client, data->qsfp);
         default:
-            return qsfp_remove(client, data->qsfp);
+            qsfp_remove(client, data->qsfp);
+            break;
     }
 
 #if (MULTIPAGE_SUPPORT == 1)
@@ -1950,7 +1957,6 @@ static int sfp_device_remove(struct i2c_client *client)
         kfree(data->writebuf);
 #endif
     kfree(data);
-    return ret;
 }
 
 /* Addresses scanned
