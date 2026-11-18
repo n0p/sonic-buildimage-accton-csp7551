@@ -56,6 +56,98 @@ index 9da52df6..5311a890 100644
          }
  
          keys[md->attrid] = name;
+diff --git a/meta/SaiSerialize.cpp b/meta/SaiSerialize.cpp
+index bd482c3e..cd8ad6c4 100644
+--- a/meta/SaiSerialize.cpp
++++ b/meta/SaiSerialize.cpp
+@@ -5964,6 +5964,20 @@ static void sai_deserialize_json_fdb_event_notification_data(
+ 
+         const sai_attr_metadata_t *meta = NULL;
+ 
++        /* CSP-7550: payload generado por syncd con cabeceras SAI 1.11; si "id"/"value"
++         * faltan, operator[] materializa null y el 302 aborta el proceso. */
++        if (!item.is_object()
++                || !item.contains("id") || !item["id"].is_string()
++                || !item.contains("value") || !item["value"].is_string())
++        {
++            SWSS_LOG_ERROR("fdb_event_ntf: malformed attribute %u (%s), skipped",
++                    i, item.dump().c_str());
++
++            fdb.attr[i].id = SAI_FDB_ENTRY_ATTR_TYPE;
++            fdb.attr[i].value.s32 = 0;
++            continue;
++        }
++
+         sai_deserialize_attr_id(item["id"], &meta);
+ 
+         fdb.attr[i].id = meta->attrid;
+@@ -6033,15 +6047,62 @@ void sai_deserialize_port_oper_status_ntf(
+ 
+     json j = json::parse(s);
+ 
++    if (!j.is_array())
++    {
++        /* CSP-7550: si el payload no es un array, operator[] materializa null y la
++         * conversion implicita a const std::string& lanza type_error.302. Se ignora. */
++        SWSS_LOG_ERROR("port_oper_status_ntf: expected array, got %s (%s), ignored",
++                j.type_name(), s.c_str());
++        count = 0;
++        *port_oper_status = nullptr;
++        return;
++    }
++
+     count = (uint32_t)j.size();
+ 
+-    auto data = new sai_port_oper_status_notification_t[count];
++    auto data = new sai_port_oper_status_notification_t[count]();
+ 
+     for (uint32_t i = 0; i < count; ++i)
+     {
+-        sai_deserialize_object_id(j[i]["port_id"], data[i].port_id);
+-        sai_deserialize_port_oper_status(j[i]["port_state"], data[i].port_state);
+-        sai_deserialize_port_error_status(j[i]["port_error_status"], data[i].port_error_status);
++        const json &item = j[i];
++
++        /* CSP-7550: port_error_status no existe en SAI 1.11, asi que el payload puede
++         * traer campos distintos a los que espera este codigo. Sin estas guardas,
++         * j[i]["campo"] inserta null y el 302 aborta orchagent. */
++        if (!item.is_object()
++                || !item.contains("port_id") || !item["port_id"].is_string()
++                || !item.contains("port_state") || !item["port_state"].is_string())
++        {
++            SWSS_LOG_ERROR("port_oper_status_ntf: malformed element %u (%s), skipped",
++                    i, item.dump().c_str());
++
++            data[i].port_id = SAI_NULL_OBJECT_ID;
++            continue;
++        }
++
++        try
++        {
++            sai_deserialize_object_id(item["port_id"], data[i].port_id);
++            sai_deserialize_port_oper_status(item["port_state"], data[i].port_state);
++
++            /* opcional en SAI 1.11: ausente == 0 == sin error */
++            if (item.contains("port_error_status") && item["port_error_status"].is_number())
++            {
++                sai_deserialize_port_error_status(item["port_error_status"],
++                        data[i].port_error_status);
++            }
++            else
++            {
++                data[i].port_error_status = (sai_port_error_status_t)0;
++            }
++        }
++        catch (const std::exception &e)
++        {
++            SWSS_LOG_ERROR("port_oper_status_ntf: element %u failed (%s), skipped",
++                    i, e.what());
++
++            data[i].port_id = SAI_NULL_OBJECT_ID;
++        }
+     }
+ 
+     *port_oper_status = data;
 diff --git a/syncd/VendorSai.cpp b/syncd/VendorSai.cpp
 index 7c050b2f..64b34bf9 100644
 --- a/syncd/VendorSai.cpp
